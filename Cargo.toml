@@ -1,25 +1,22 @@
 [package]
-name = "web-view"
-version = "0.4.0"
-authors = ["Boscop"]
+name = "better-web-view"
+version = "0.5.0"
+authors = ["Boscop", "Firebain"]
 readme = "README.md"
 license = "MIT"
-repository = "https://github.com/Boscop/web-view"
-description = "Rust bindings for webview, a tiny cross-platform library to render web-based GUIs for desktop applications"
+repository = "https://github.com/Firebain/better-web-view"
+description = "The library is a web-view modification and provides a better way of communication between the Rust backend and the JavaScript frontend."
 keywords = ["web", "gui", "desktop", "electron", "webkit"]
 categories = ["gui", "web-programming", "api-bindings", "rendering", "visualization"]
-exclude = ["examples/todo-ps/dist/**/*", "examples/elm-counter/index.html"]
+edition = "2018"
 
 [dependencies]
 urlencoding = "1.0"
 webview-sys = { path = "webview-sys", version = "0.1.1" }
 boxfnonce = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 [features]
 default = ["V1_30"]
 V1_30 = []
-
-[dev-dependencies]
-serde = "1.0"
-serde_derive = "1.0"
-serde_json = "1.0"

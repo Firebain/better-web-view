@@ -1,26 +1,13 @@
-//! [![Build Status]][travis] [![Latest Version]][crates.io]
+//! [![Latest Version]][crates.io]
 //!
-//! [Build Status]: https://api.travis-ci.org/Boscop/web-view.svg?branch=master
-//! [travis]: https://travis-ci.org/Boscop/web-view
-//! [Latest Version]: https://img.shields.io/crates/v/web-view.svg
-//! [crates.io]: https://crates.io/crates/web-view
+//! [Latest Version]: https://img.shields.io/crates/v/better-web-view.svg
+//! [crates.io]: https://crates.io/crates/better-web-view
 //!
-//! This library provides Rust bindings for the [webview](https://github.com/zserge/webview) library
-//! to allow easy creation of cross-platform Rust desktop apps with GUIs based on web technologies.
-//!
-//! It supports two-way bindings for communication between the Rust backend and JavaScript frontend.
-//!
-//! It uses Cocoa/WebKit on macOS, gtk-webkit2 on Linux and MSHTML (IE10/11) on Windows, so your app
-//! will be **much** leaner than with Electron.
-//!
-//! To use a custom version of webview, define an environment variable WEBVIEW_DIR with the path to
-//! its source directory.
-//!
-//! For usage info please check out [the examples] and the [original readme].
-//!
-//! [the examples]: https://github.com/Boscop/web-view/tree/master/examples
-//! [original readme]: https://github.com/zserge/webview/blob/master/README.md
-
+//! The library is a [web-view](https://github.com/Boscop/web-view) modification and provides a better way 
+//! of communication between the Rust backend and the JavaScript frontend.
+//! 
+//! For usage info please check out [the example](https://github.com/Firebain/better-web-view/tree/master/examples) 
+//! and the [original repo](https://github.com/Boscop/web-view).
 extern crate boxfnonce;
 extern crate urlencoding;
 extern crate webview_sys as ffi;
@@ -29,10 +16,14 @@ mod color;
 mod dialog;
 mod error;
 mod escape;
+mod routing;
 pub use color::Color;
 pub use dialog::DialogBuilder;
 pub use error::{CustomError, Error, WVResult};
 pub use escape::escape;
+pub use routing::Router;
+pub use routing::messages::{Request, Response};
+pub use serde_json::{json, Value};
 
 use boxfnonce::SendBoxFnOnce;
 use ffi::*;
@@ -76,7 +67,7 @@ pub enum Content<T> {
 ///         .resizable(true)
 ///         .debug(true)
 ///         .user_data(())
-///         .invoke_handler(|_webview, _arg| Ok(()))
+///         .router(Router::default())
 ///         .build()
 ///         .unwrap()
 ///         .run()
@@ -85,20 +76,19 @@ pub enum Content<T> {
 /// ```
 ///
 /// [`WebView`]: struct.WebView.html
-pub struct WebViewBuilder<'a, T: 'a, I, C> {
+pub struct WebViewBuilder<'a, T: 'a, C> {
     pub title: &'a str,
     pub content: Option<Content<C>>,
     pub width: i32,
     pub height: i32,
     pub resizable: bool,
     pub debug: bool,
-    pub invoke_handler: Option<I>,
+    pub router: Option<Router<'a, T>>,
     pub user_data: Option<T>,
 }
 
-impl<'a, T: 'a, I, C> Default for WebViewBuilder<'a, T, I, C>
+impl<'a, T: 'a, C> Default for WebViewBuilder<'a, T, C>
 where
-    I: FnMut(&mut WebView<T>, &str) -> WVResult + 'a,
     C: AsRef<str>,
 {
     fn default() -> Self {
@@ -114,15 +104,14 @@ where
             height: 600,
             resizable: true,
             debug,
-            invoke_handler: None,
+            router: None,
             user_data: None,
         }
     }
 }
 
-impl<'a, T: 'a, I, C> WebViewBuilder<'a, T, I, C>
+impl<'a, T: 'a, C> WebViewBuilder<'a, T, C>
 where
-    I: FnMut(&mut WebView<T>, &str) -> WVResult + 'a,
     C: AsRef<str>,
 {
     /// Alias for [`WebViewBuilder::default()`].
@@ -171,16 +160,10 @@ where
         self
     }
 
-    /// Sets the invoke handler callback. This will be called when a message is received from
-    /// JavaScript.
-    ///
-    /// # Errors
-    ///
-    /// If the closure returns an `Err`, it will be returned on the next call to [`step()`].
-    ///
-    /// [`step()`]: struct.WebView.html#method.step
-    pub fn invoke_handler(mut self, invoke_handler: I) -> Self {
-        self.invoke_handler = Some(invoke_handler);
+    /// Sets the route. Sets a router. The router determine which callback is executed when 
+    /// receives a javascript request
+    pub fn router(mut self, router: Router<'a, T>) -> Self {
+        self.router = Some(router);
         self
     }
 
@@ -209,9 +192,13 @@ where
             }
         };
         let user_data = require_field!(user_data);
-        let invoke_handler = require_field!(invoke_handler);
+        let router = require_field!(router);
 
-        WebView::new(
+        let invoke_handler = move |webview: &mut WebView<T>, arg: &str| -> WVResult {
+            router.resolve(webview, arg)
+        };
+
+        let mut webview = WebView::new(
             &title,
             &url,
             self.width,
@@ -220,7 +207,11 @@ where
             self.debug,
             user_data,
             invoke_handler,
-        )
+        )?;
+
+        webview.eval(include_str!("../dist/backend.js"))?;
+
+        Ok(webview)
     }
 
     /// Validates provided arguments and runs a new WebView to completion, returning the user data.
@@ -237,9 +228,8 @@ where
 ///
 /// [`WebView`]: struct.Webview.html
 /// [`WebViewBuilder::default()`]: struct.WebviewBuilder.html#impl-Default
-pub fn builder<'a, T, I, C>() -> WebViewBuilder<'a, T, I, C>
+pub fn builder<'a, T, C>() -> WebViewBuilder<'a, T, C>
 where
-    I: FnMut(&mut WebView<T>, &str) -> WVResult + 'a,
     C: AsRef<str>,
 {
     WebViewBuilder::new()
